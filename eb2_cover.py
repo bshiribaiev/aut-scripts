@@ -36,8 +36,8 @@ def gather(docx_path: str):
 def display(groups):
     for sec, items in groups.items():
         print(sec)
-        for _, desc in items:
-            print(desc)
+        for num, desc in items:
+            print(f"({num}) {desc}.")   # ← number in parentheses
         print()  # blank line between sections
 
 if __name__ == "__main__":
