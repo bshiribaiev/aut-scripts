@@ -28,26 +28,47 @@ if [ ! -d "$destinationFolder" ]; then
   exit 1
 fi
 
-echo "✅ Folders exist. Searching for attachment files..."
+echo "Folders exist. Searching for numbered files, attachment files, and EN files..."
 
-# Find files
-find "$originalFolder" -type f -iname "*attachment*" | while read -r file; do
+found_any=false
+
+# Find files that match any of the patterns
+find "$originalFolder" -type f \( -iname "*attachment*" -o -name "[0-9]*" -o -iname "EN [0-9]*" \) | while read -r file; do
   found_any=true
   echo "Found file: $file"
   filename=$(basename "$file")
   lowercase_filename=$(echo "$filename" | tr '[:upper:]' '[:lower:]')
+  folderName=""
 
+  # Check for attachment pattern first
   if [[ $lowercase_filename =~ attachment[[:space:]_]*([0-9]+) ]]; then
     folderName="${BASH_REMATCH[1]}"
+    echo "Found attachment pattern with number: $folderName"
+  # Check for files starting with numbers
+  elif [[ $filename =~ ^([0-9]+) ]]; then
+    folderName="${BASH_REMATCH[1]}"
+    echo "Found numbered file pattern with number: $folderName"
+  # Check for EN followed by number pattern
+  elif [[ $filename =~ ^EN[[:space:]]+([0-9]+) ]]; then
+    folderName="${BASH_REMATCH[1]}"
+    echo "Found EN pattern with number: $folderName"
+  fi
+
+  if [ -n "$folderName" ]; then
     targetFolder="$destinationFolder/$folderName"
     mkdir -p "$targetFolder"
     cp "$file" "$targetFolder/"
-    echo "✅ Copied '$filename' → $targetFolder"
+    echo "Copied '$filename' → $targetFolder"
   else
-    echo "⚠️ No number found in filename '$filename'"
+    echo "No number found in filename '$filename'"
   fi
 done
 
-if [ "$found_any" = false ]; then
-  echo "❌ No matching files found in: $originalFolder"
+# Check if we found any files (note: this check won't work perfectly due to subshell)
+# Using find again to verify
+file_count=$(find "$originalFolder" -type f \( -iname "*attachment*" -o -name "[0-9]*" -o -iname "EN [0-9]*" \) | wc -l)
+if [ "$file_count" -eq 0 ]; then
+  echo "No matching files found in: $originalFolder"
+else
+  echo "Processing completed. Found $file_count matching files."
 fi
