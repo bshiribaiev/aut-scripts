@@ -10,7 +10,9 @@ SECTION_RX = re.compile(r'^[IVXLCDM]+\.\s+.+', re.I)
 # Anchor used to locate each attachment and then slice until the next one
 ATTACH_ANCHOR_RX = re.compile(r'Attachment\s+(\d+)\s*[-–—]\s*', re.I)
 
-URL_RX = re.compile(r'https?://[^\s)]+')  # grab full URL up to whitespace or ')'
+# grab full URL up to whitespace or ')'
+URL_RX = re.compile(r'https?://[^\s)]+')
+
 
 def iter_paragraph_text(docx_path: str):
     doc = Document(docx_path)
@@ -18,6 +20,7 @@ def iter_paragraph_text(docx_path: str):
         txt = p.text.strip()
         if txt:
             yield txt
+
 
 def _clean_desc(raw: str) -> str:
     desc = raw.strip()
@@ -35,8 +38,11 @@ def _clean_desc(raw: str) -> str:
         desc += '.'
     return desc
 
+
 def gather(docx_path: str):
     by_sec = defaultdict(list)
+    # Track which attachment numbers we've seen per section
+    seen_in_sec = defaultdict(set)
     current_sec = "UNSPECIFIED SECTION"
 
     for para in iter_paragraph_text(docx_path):
@@ -51,6 +57,11 @@ def gather(docx_path: str):
 
         for i, m in enumerate(matches):
             num = int(m.group(1))
+
+            # Skip if we've already seen this attachment number in this section
+            if num in seen_in_sec[current_sec]:
+                continue
+
             start = m.end()
             end = matches[i + 1].start() if i + 1 < len(matches) else len(para)
             raw_desc = para[start:end]
@@ -60,12 +71,14 @@ def gather(docx_path: str):
             desc = _clean_desc(raw_desc)
 
             by_sec[current_sec].append((num, desc))
+            seen_in_sec[current_sec].add(num)  # Mark this attachment as seen
 
     # Sort by attachment number within each section
     for sec in by_sec:
         by_sec[sec].sort(key=lambda t: t[0])
 
     return by_sec
+
 
 def display(groups):
     for sec, items in groups.items():
@@ -74,6 +87,7 @@ def display(groups):
             # desc is already cleaned and properly punctuated
             print(f"({num}) {desc}")
         print()  # blank line between sections
+
 
 if __name__ == "__main__":
     raw_input_path = input("Enter the path to the .docx file: ").strip()
