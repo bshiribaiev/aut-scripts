@@ -1,4 +1,5 @@
-# eb1_cover.py — section-aware attachment extractor
+
+# eb1_cover_v3.py — robust section-aware attachment extractor (broader section headers incl. High Salary)
 from collections import OrderedDict
 from pathlib import Path
 import re
@@ -11,7 +12,7 @@ from lxml import etree     # pip install lxml
 ATTACHMENT_RE = re.compile(
     r"""Attachment\s+(\d+)\s*[-–—:]?\s*         # "Attachment <num> -"
         (.+?)                                   # description (lazy)
-        (?:,\s*available\s+at\s+(https?://[^\s)\]>,;"']+))?   # optional URL
+        (?:,\s*available\s+at\s*[:\-–—]?\s*(https?://[^\s)\]>,;"']+))?   # optional URL (after 'available at')
         (?=                                     # stop before:
             \s*(?:and\s+Attachment\s+\d+\s*[-–—:])|  # "... and Attachment N -"
             \s*(?:Attachment\s+\d+\s*[-–—:])|        # or "Attachment N -"
@@ -22,16 +23,24 @@ ATTACHMENT_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
-URL_IN_DESC_RE = re.compile(r'https?://[^\s)\]>,;"\']+')
-
-# Section starts to catch the affidavit’s big headings
-SECTION_PREFIXES = (
-    "EVIDENCE OF",
-    "DOCUMENTATION TO ESTABLISH",
-    "SUSTAINED NATIONAL OR INTERNATIONAL ACCLAIM",
-    "CONCLUSION",
+# Also capture plain enumerations like "(123) Description..., available at: URL"
+ITEM_ENUM_RE = re.compile(
+    r"""
+    ^\s*\((\d+)\)\s*                # leading (num)
+    (.+?)                           # description
+    (?:,\s*available\s+at\s*[:\-–—]?\s*(https?://[^\s)\]>,;"']+))?
+    \s*\.?\s*$
+    """,
+    re.IGNORECASE | re.VERBOSE,
 )
-SECTION_RE = re.compile(r'^\s*(?:' + '|'.join(re.escape(p) for p in SECTION_PREFIXES) + r')\b.*$', re.I)
+
+URL_IN_TEXT_RE = re.compile(r'https?://[^\s)\]>,;"\']+')
+
+# === Section header detection ===
+SECTION_LINE_RE = re.compile(
+    r'^\s*(?:EVIDENCE\b.*|DOCUMENTATION TO ESTABLISH\b.*|SUSTAINED NATIONAL OR INTERNATIONAL ACCLAIM\b.*|CONCLUSION\b.*)$',
+    re.IGNORECASE
+)
 
 # === Low-level helpers ===
 
@@ -70,22 +79,41 @@ def _hyperlinks_in_paragraph(p) -> List[str]:
         if m:
             urls.append(m.group(1))
 
-    return urls
+    # De-duplicate while preserving order
+    seen = set()
+    out = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+def _looks_truncated(url: str) -> bool:
+    if not url:
+        return True
+    if url.endswith(('https://www', 'http://www', 'www')):
+        return True
+    m = re.match(r'https?://([^/]+)', url)
+    if not m:
+        return True
+    host = m.group(1)
+    return '.' not in host
 
 def _clean_desc(raw: str) -> str:
     desc = ' '.join((raw or '').strip().split())
+    # Normalize weird "is, available at" and spacing
+    desc = re.sub(r'\bis,\s*available\s+at\b', 'is available at', desc, flags=re.I)
     # Normalize “available at”
-    desc = re.sub(r',?\s*available\s+at\s+', ', available at ', desc, flags=re.I)
+    desc = re.sub(r',?\s*available\s+at\s*[:\-–—]?\s*', ', available at ', desc, flags=re.I)
     # If desc already ends with a URL, don't add a period
     if re.search(r'https?://[^\s)\]>\]}]+$', desc or ''):
         return desc
-    # Tidy punctuation artifacts like ", -"
+    # Tidy punctuation artifacts
     desc = re.sub(r'\s*,\s*-\s*$', '', desc)
     desc = desc.rstrip(' .,;')
     return (desc + '.') if desc else desc
 
 def _dedupe_best(pairs: List[Tuple[int, str]]) -> List[Tuple[int, str]]:
-    """Within a section, keep one line per attachment number; prefer entries with URLs or longer text."""
     best = {}
     for num, desc in pairs:
         cand_has_url = "http" in (desc or '')
@@ -101,11 +129,6 @@ def _dedupe_best(pairs: List[Tuple[int, str]]) -> List[Tuple[int, str]]:
 # === Public API ===
 
 def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], List[Tuple[int, str]]]:
-    """
-    Returns an OrderedDict mapping:
-      section_title (UPPERCASE) -> [(attachment_number, description_with_optional_url), ...]
-    Attachments before the first section are stored under key None.
-    """
     groups: "OrderedDict[Optional[str], List[Tuple[int, str]]]" = OrderedDict()
     current_section: Optional[str] = None
     groups.setdefault(current_section, [])
@@ -115,8 +138,8 @@ def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], Li
         if not text:
             continue
 
-        # Detect section headers and switch the current bucket
-        if SECTION_RE.match(text):
+        # Detect section headers (now includes "EVIDENCE THAT ..." like High Salary)
+        if SECTION_LINE_RE.match(text):
             title = ' '.join(text.split())
             current_section = title.upper()
             if current_section not in groups:
@@ -125,7 +148,9 @@ def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], Li
                 print(f"[SECTION] {current_section}")
             continue
 
-        # Extract attachments inside the paragraph
+        matched_any = False
+
+        # Extract "Attachment N - ..." items inside the paragraph
         if 'attachment' in text.lower():
             para_links = _hyperlinks_in_paragraph(p)
             link_cursor = 0
@@ -137,38 +162,75 @@ def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], Li
                 desc = (m.group(2) or '').strip().rstrip(',')
                 url = (m.group(3) or '').strip()
 
-                # URL in visible text
+                # Prefer a URL found in the visible text (in or near the match span)
                 if not url:
-                    found = URL_IN_DESC_RE.search(desc)
+                    found = URL_IN_TEXT_RE.search(text[m.start(): m.end()])
+                    if found:
+                        url = found.group(0).strip()
+                if not url:
+                    found = URL_IN_TEXT_RE.search(desc)
                     if found:
                         url = found.group(0).strip()
 
-                # If “available at” is already in the captured desc but no visible URL,
-                # use the next paragraph hyperlink
-                if not url and 'available at' in desc.lower() and link_cursor < len(para_links):
+                # If missing or looks truncated, try hyperlink relationships in match window or after
+                if (not url or _looks_truncated(url)) and 'available at' in text[m.start(): m.end()].lower() and link_cursor < len(para_links):
                     url = para_links[link_cursor]
                     link_cursor += 1
 
-                # Else, only look AFTER this match but BEFORE the next "Attachment N"
-                if not url:
+                if (not url or _looks_truncated(url)):
                     next_start = all_matches[i+1].start() if i + 1 < len(all_matches) else len(text)
-                    window = text[m.end(): next_start].lower()
-                    if 'available at' in window and link_cursor < len(para_links):
+                    window = text[m.end(): next_start]
+                    if 'available at' in window.lower() and link_cursor < len(para_links):
                         url = para_links[link_cursor]
                         link_cursor += 1
 
-                # Build final description, inserting URL once if needed
+                # Build final description, inserting or replacing URL
                 full_desc = desc
-                if url and "available at" not in full_desc.lower():
-                    full_desc = f"{full_desc}, available at {url}"
-                elif url and "available at" in full_desc.lower():
-                    # Fill in a trailing “available at” with the URL
-                    full_desc = re.sub(r'(available\s+at)\s*$', rf'\1 {url}', full_desc, flags=re.I)
+                if url:
+                    if "available at" not in full_desc.lower():
+                        full_desc = f"{full_desc}, available at {url}"
+                    else:
+                        full_desc = re.sub(r'(available\s+at)\s*[:\-–—]?\s*(?=$|[).;])',
+                                           rf'\1 {url}', full_desc, flags=re.I)
+                        full_desc = re.sub(r'(available\s+at\s*[:\-–—]?\s*)(https?://[^\s)\]>,;"\']*)',
+                                           rf'\1{url}', full_desc, flags=re.I)
 
                 pairs.append((num, _clean_desc(full_desc)))
 
             if pairs:
+                matched_any = True
                 groups[current_section].extend(_dedupe_best(pairs))
+
+        # Fallback: handle plain enumerations like "(12) Description, available at: URL"
+        if not matched_any:
+            m = ITEM_ENUM_RE.match(text)
+            if m:
+                para_links = _hyperlinks_in_paragraph(p)
+                num = int(m.group(1))
+                desc = (m.group(2) or '').strip().rstrip(',')
+                url = (m.group(3) or '').strip()
+
+                # Prefer any URL in the paragraph text
+                if not url:
+                    found = URL_IN_TEXT_RE.search(text)
+                    if found:
+                        url = found.group(0).strip()
+
+                # If still missing or looks truncated, but a hyperlink exists, use it
+                if (not url or _looks_truncated(url)) and para_links:
+                    url = para_links[0]
+
+                full_desc = desc
+                if url:
+                    if "available at" not in full_desc.lower():
+                        full_desc = f"{full_desc}, available at {url}"
+                    else:
+                        full_desc = re.sub(r'(available\s+at)\s*[:\-–—]?\s*(?=$|[).;])',
+                                           rf'\1 {url}', full_desc, flags=re.I)
+                        full_desc = re.sub(r'(available\s+at\s*[:\-–—]?\s*)(https?://[^\s)\]>,;"\']*)',
+                                           rf'\1{url}', full_desc, flags=re.I)
+
+                groups[current_section].append((num, _clean_desc(full_desc)))
 
     # Final pass: dedupe per section
     for sect in list(groups.keys()):
@@ -177,7 +239,6 @@ def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], Li
     return groups
 
 def display_grouped(groups: Dict[Optional[str], List[Tuple[int, str]]]) -> None:
-    """Print in the requested format."""
     for sect, items in groups.items():
         if sect is None or not items:
             for num, desc in items:
@@ -188,7 +249,7 @@ def display_grouped(groups: Dict[Optional[str], List[Tuple[int, str]]]) -> None:
                 print(f"({num}) {desc}")
             print()
 
-# --- CLI-compatible helpers (back-compat) ---
+# Back-compat helpers
 
 def iter_paragraph_text(docx_path: str):
     for p in _iter_paragraphs(Path(docx_path)):
@@ -197,12 +258,10 @@ def iter_paragraph_text(docx_path: str):
             yield txt
 
 def extract_attachments(docx_path: str, debug: bool=False):
-    """Legacy: return a flat, de-duplicated list (num, desc) across the whole doc."""
     groups = extract_grouped(docx_path, debug=debug)
     flat = []
     for items in groups.values():
         flat.extend(items)
-    # unique by number
     seen = set()
     uniq = []
     for n, d in sorted(flat, key=lambda t: t[0]):
