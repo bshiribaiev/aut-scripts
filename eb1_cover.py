@@ -101,9 +101,11 @@ def _looks_truncated(url: str) -> bool:
 
 def _clean_desc(raw: str) -> str:
     desc = ' '.join((raw or '').strip().split())
+    # Remove page references like ", pages 24-25" or ", page 50" or ", pp. 24-25"
+    desc = re.sub(r',?\s*(?:pages?|pp\.?)\s*[\d\-–—,\s]+', '', desc, flags=re.I)
     # Normalize weird "is, available at" and spacing
     desc = re.sub(r'\bis,\s*available\s+at\b', 'is available at', desc, flags=re.I)
-    # Normalize “available at”
+    # Normalize "available at"
     desc = re.sub(r',?\s*available\s+at\s*[:\-–—]?\s*', ', available at ', desc, flags=re.I)
     # If desc already ends with a URL, don't add a period
     if re.search(r'https?://[^\s)\]>\]}]+$', desc or ''):

@@ -25,6 +25,9 @@ def iter_paragraph_text(docx_path: str):
 def _clean_desc(raw: str) -> str:
     desc = raw.strip()
 
+    # Remove page references like ", pages 24-25" or ", page 50" or ", pp. 24-25"
+    desc = re.sub(r',?\s*(?:pages?|pp\.?)\s*[\d\-–—,\s]+', '', desc, flags=re.I)
+
     # If a URL is followed immediately by a closing paren, keep the URL clean but drop the dangling ')'
     # Example: "... https://example.com/path)."
     # We'll just leave the ')' to punctuation cleanup below.
