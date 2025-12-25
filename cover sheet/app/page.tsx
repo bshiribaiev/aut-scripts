@@ -95,7 +95,10 @@ export default function Home() {
     let text = '';
     
     for (const [section, items] of Object.entries(result.attachments)) {
-      text += `${section}\n`;
+      // Only add section header if it's not empty
+      if (section) {
+        text += `${section}\n`;
+      }
       for (const item of items) {
         text += `(${item.num}) ${item.desc}\n`;
       }
@@ -120,7 +123,7 @@ export default function Home() {
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Select Extractor Type
+                Case Type
               </label>
               <div className="flex gap-4">
                 <label className="flex items-center cursor-pointer">
