@@ -23,6 +23,16 @@ ATTACHMENT_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# Also handle "(See Attachment N – ...)" format embedded in paragraphs
+SEE_ATTACHMENT_RE = re.compile(
+    r"""\(See\s+Attachment\s+(\d+)\s*[-–—]\s*  # "(See Attachment <num> –"
+        (.+?)                                   # description (lazy)
+        (?:,?\s*available\s+at\s*[:\-–—]?\s*(https?://[^\s)]+))?  # optional URL
+        \s*\)                                   # closing paren
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 # Also capture plain enumerations like "(123) Description..., available at: URL"
 ITEM_ENUM_RE = re.compile(
     r"""
@@ -38,7 +48,7 @@ URL_IN_TEXT_RE = re.compile(r'https?://[^\s)\]>,;"\']+')
 
 # === Section header detection ===
 SECTION_LINE_RE = re.compile(
-    r'^\s*(?:EVIDENCE\b.*|DOCUMENTATION TO ESTABLISH\b.*|SUSTAINED NATIONAL OR INTERNATIONAL ACCLAIM\b.*|CONCLUSION\b.*)$',
+    r'^\s*(?:EVIDENCE\b.*|DOCUMENTATION TO ESTABLISH\b.*|SUSTAINED NATIONAL OR INTERNATIONAL ACCLAIM\b.*)$',
     re.IGNORECASE
 )
 
@@ -140,9 +150,13 @@ def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], Li
         if not text:
             continue
 
-        # Detect section headers (now includes "EVIDENCE THAT ..." like High Salary)
-        if SECTION_LINE_RE.match(text):
+        # Detect section headers (exclude CONCLUSION)
+        if SECTION_LINE_RE.match(text) and 'CONCLUSION' not in text.upper():
             title = ' '.join(text.split())
+            # Remove "(PAGES ...)" from section titles
+            title = re.sub(r'\s*\(PAGES?\s+[\d\-–—,\s]+\)', '', title, flags=re.I)
+            # Remove trailing punctuation like semicolons or periods
+            title = title.rstrip(';.').strip()
             current_section = title.upper()
             if current_section not in groups:
                 groups[current_section] = []
@@ -152,8 +166,48 @@ def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], Li
 
         matched_any = False
 
+        # First, check for "(See Attachment N – ...)" format
+        if 'see attachment' in text.lower():
+            para_links = _hyperlinks_in_paragraph(p)
+            link_cursor = 0
+            pairs = []
+            see_matches = list(SEE_ATTACHMENT_RE.finditer(text))
+
+            for m in see_matches:
+                num = int(m.group(1))
+                desc = (m.group(2) or '').strip().rstrip(',')
+                url = (m.group(3) or '').strip()
+
+                # Look for URL in the description if not found
+                if not url:
+                    found = URL_IN_TEXT_RE.search(desc)
+                    if found:
+                        url = found.group(0).strip()
+
+                # Try hyperlink relationships if still missing
+                if (not url or _looks_truncated(url)) and 'available at' in desc.lower() and link_cursor < len(para_links):
+                    url = para_links[link_cursor]
+                    link_cursor += 1
+
+                # Build final description
+                full_desc = desc
+                if url:
+                    if "available at" not in full_desc.lower():
+                        full_desc = f"{full_desc}, available at {url}"
+                    else:
+                        full_desc = re.sub(r'(available\s+at)\s*[:\-–—]?\s*(?=$|[).;])',
+                                           rf'\1 {url}', full_desc, flags=re.I)
+                        full_desc = re.sub(r'(available\s+at\s*[:\-–—]?\s*)(https?://[^\s)\]>,;"\']*)',
+                                           rf'\1{url}', full_desc, flags=re.I)
+
+                pairs.append((num, _clean_desc(full_desc)))
+
+            if pairs and current_section:
+                matched_any = True
+                groups[current_section].extend(pairs)
+
         # Extract "Attachment N - ..." items inside the paragraph
-        if 'attachment' in text.lower():
+        if not matched_any and 'attachment' in text.lower():
             para_links = _hyperlinks_in_paragraph(p)
             link_cursor = 0
             pairs = []
@@ -204,7 +258,7 @@ def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], Li
                 groups[current_section].extend(_dedupe_best(pairs))
 
         # Fallback: handle plain enumerations like "(12) Description, available at: URL"
-        if not matched_any:
+        if not matched_any and current_section:
             m = ITEM_ENUM_RE.match(text)
             if m:
                 para_links = _hyperlinks_in_paragraph(p)
@@ -234,11 +288,14 @@ def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], Li
 
                 groups[current_section].append((num, _clean_desc(full_desc)))
 
-    # Final pass: dedupe per section
+    # Final pass: dedupe per section and remove empty sections
+    result = OrderedDict()
     for sect in list(groups.keys()):
-        groups[sect] = _dedupe_best(groups[sect])
+        deduped = _dedupe_best(groups[sect])
+        if deduped:  # Only include sections with attachments
+            result[sect] = deduped
 
-    return groups
+    return result
 
 def display_grouped(groups: Dict[Optional[str], List[Tuple[int, str]]]) -> None:
     for sect, items in groups.items():
