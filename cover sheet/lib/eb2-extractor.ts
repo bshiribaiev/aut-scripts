@@ -65,9 +65,9 @@ function cleanDesc(raw: string): string {
 export function extractEB2(text: string): GroupedAttachments {
   const bySec: GroupedAttachments = {};
   const seenInSec: { [section: string]: Set<number> } = {};
-  let currentSec = "UNSPECIFIED SECTION";
+  let currentSec = ""; // Empty string for attachments before any section
   
-  // Initialize default section
+  // Initialize default section (attachments before any section header)
   if (!bySec[currentSec]) {
     bySec[currentSec] = [];
     seenInSec[currentSec] = new Set();
@@ -130,9 +130,9 @@ export function extractEB2(text: string): GroupedAttachments {
   
   // Sort sections by Roman numeral order
   sections.sort((a, b) => {
-    // Handle "UNSPECIFIED SECTION" - put it at the end
-    if (a.name === "UNSPECIFIED SECTION") return 1;
-    if (b.name === "UNSPECIFIED SECTION") return -1;
+    // Handle empty section name (attachments before any section) - put it at the beginning
+    if (a.name === "") return -1;
+    if (b.name === "") return 1;
     
     const numA = extractRomanNumeral(a.name);
     const numB = extractRomanNumeral(b.name);

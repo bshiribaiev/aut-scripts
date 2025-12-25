@@ -230,10 +230,12 @@ export default function Home() {
 
               <div className="bg-gray-50 rounded-lg p-6 max-h-[600px] overflow-y-auto">
                 {Object.entries(result.attachments).map(([section, items]) => (
-                  <div key={section} className="mb-6">
-                    <h3 className="text-lg font-bold text-gray-900 mb-3 uppercase">
-                      {section}
-                    </h3>
+                  <div key={section || 'unspecified'} className="mb-6">
+                    {section && (
+                      <h3 className="text-lg font-bold text-gray-900 mb-3 uppercase">
+                        {section}
+                      </h3>
+                    )}
                     <ul className="space-y-2">
                       {items.map((item) => (
                         <li key={item.num} className="text-gray-700">
