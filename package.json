@@ -1,0 +1,16 @@
+{
+  "name": "law-firm-automations",
+  "private": true,
+  "description": "Monorepo wrapper for the cover-sheet Next.js app (Vercel detection helper).",
+  "scripts": {
+    "dev": "npm --prefix cover-sheet run dev",
+    "build": "npm --prefix cover-sheet run build",
+    "start": "npm --prefix cover-sheet run start",
+    "lint": "npm --prefix cover-sheet run lint"
+  },
+  "devDependencies": {
+    "next": "^14.0.0"
+  }
+}
+
+
