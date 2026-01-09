@@ -138,6 +138,29 @@ def _dedupe_best(pairs: List[Tuple[int, str]]) -> List[Tuple[int, str]]:
                 best[num] = desc
     return sorted(best.items(), key=lambda t: t[0])
 
+# === Heading normalization ===
+def _normalize_heading_pronouns(title: str) -> str:
+    """
+    Normalize EB-1 section headings to use PETITIONER instead of I / MY / ME.
+    Works case-insensitively; caller uppercases afterward.
+    """
+    t = title
+    # Common phrases first
+    t = re.sub(r'\bABOUT\s+ME\b', 'ABOUT PETITIONER', t, flags=re.I)
+    t = re.sub(r"\bOF\s+MY\b", "OF PETITIONER'S", t, flags=re.I)
+    t = re.sub(r'\bTHAT\s+I\s+COMMAND\b', 'THAT PETITIONER COMMANDS', t, flags=re.I)
+    t = re.sub(r'\bTHAT\s+I\s+HAVE\b', 'THAT PETITIONER HAS', t, flags=re.I)
+    t = re.sub(r'\bTHAT\s+I\s+AM\b', 'THAT PETITIONER IS', t, flags=re.I)
+    t = re.sub(r'\bTHAT\s+I\s+WILL\b', 'THAT PETITIONER WILL', t, flags=re.I)
+    t = re.sub(r'\bTHAT\s+I\b', 'THAT PETITIONER', t, flags=re.I)
+
+    # Generic replacements
+    t = re.sub(r'\bMY\b', "PETITIONER'S", t, flags=re.I)
+    # Standalone I (avoid touching "IN", etc.)
+    t = re.sub(r'(^|[^A-Z])I([^A-Z]|$)', r'\1PETITIONER\2', t, flags=re.I)
+    t = re.sub(r'\bME\b', 'PETITIONER', t, flags=re.I)
+    return t
+
 # === Public API ===
 
 def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], List[Tuple[int, str]]]:
@@ -157,6 +180,8 @@ def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], Li
             title = re.sub(r'\s*\(PAGES?\s+[\d\-–—,\s]+\)', '', title, flags=re.I)
             # Remove trailing punctuation like semicolons or periods
             title = title.rstrip(';.').strip()
+            # Normalize pronouns (I / MY / ME) -> PETITIONER
+            title = _normalize_heading_pronouns(title)
             current_section = title.upper()
             if current_section not in groups:
                 groups[current_section] = []

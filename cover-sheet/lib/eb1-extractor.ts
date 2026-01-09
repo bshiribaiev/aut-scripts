@@ -17,6 +17,28 @@ const URL_IN_TEXT_RE = /https?:\/\/\S+/g;
 
 const SECTION_LINE_RE = /^\s*(?:EVIDENCE\b.*|DOCUMENTATION TO ESTABLISH\b.*|SUSTAINED NATIONAL OR INTERNATIONAL ACCLAIM\b.*)$/i;
 
+function normalizeHeadingPronouns(titleUpper: string): string {
+  // Operates on UPPERCASE headings only.
+  let t = titleUpper;
+
+  // Common phrases first (to keep grammar reasonable where easy)
+  t = t.replace(/\bABOUT\s+ME\b/g, 'ABOUT PETITIONER');
+  t = t.replace(/\bOF\s+MY\b/g, "OF PETITIONER'S");
+  t = t.replace(/\bTHAT\s+I\s+COMMAND\b/g, 'THAT PETITIONER COMMANDS');
+  t = t.replace(/\bTHAT\s+I\s+HAVE\b/g, 'THAT PETITIONER HAS');
+  t = t.replace(/\bTHAT\s+I\s+AM\b/g, 'THAT PETITIONER IS');
+  t = t.replace(/\bTHAT\s+I\s+WILL\b/g, 'THAT PETITIONER WILL');
+  t = t.replace(/\bTHAT\s+I\b/g, 'THAT PETITIONER');
+
+  // Generic replacements
+  t = t.replace(/\bMY\b/g, "PETITIONER'S");
+  // Replace standalone pronoun I (avoid touching words like "IN")
+  t = t.replace(/(^|[^A-Z])I([^A-Z]|$)/g, '$1PETITIONER$2');
+  t = t.replace(/\bME\b/g, 'PETITIONER');
+
+  return t;
+}
+
 function cleanDesc(raw: string): string {
   let desc = raw.trim().replace(/\s+/g, ' ');
   
@@ -81,13 +103,15 @@ export function extractEB1(text: string): GroupedAttachments {
       title = title.replace(/\s*\(PAGES?\s+[\d\-–—,\s]+\)/gi, '');
       // Remove trailing punctuation like semicolons or periods
       title = title.replace(/[;.]+$/, '').trim();
+      // Normalize pronouns (I / MY / ME) -> PETITIONER
+      title = normalizeHeadingPronouns(title);
       
       // Normalize similar section names to prevent duplicates
       if (/EVIDENCE.*LEADING.*CRITICAL.*ROLE/i.test(title)) {
         title = 'EVIDENCE OF LEADING OR CRITICAL ROLE IN AN ORGANIZATION';
       }
       if (/EVIDENCE.*MEMBERSHIP.*ASSOCIATIONS.*(?:THAT|WHICH).*DEMAND/i.test(title)) {
-        title = 'EVIDENCE OF MY MEMBERSHIP IN ASSOCIATIONS IN THE FIELD WHICH DEMAND OUTSTANDING ACHIEVEMENT OF THEIR MEMBERS';
+        title = "EVIDENCE OF PETITIONER'S MEMBERSHIP IN ASSOCIATIONS IN THE FIELD WHICH DEMAND OUTSTANDING ACHIEVEMENT OF THEIR MEMBERS";
       }
       
       currentSection = title;
