@@ -11,12 +11,33 @@ export interface GroupedAttachments {
 const SECTION_RX = /^[IVXLCDM]+\.\s+.+/i;
 // Also handle "(See Attachment N – ...)" format embedded in paragraphs
 const SEE_ATTACHMENT_RE = /\(See\s+Attachment\s+(\d+)\s*[-–—]\s*(.+?)(?:,?\s*available\s+at\s*[:\-–—]?\s*(https?:\/\/\S+))?\s*\)/gi;
-// Handle embedded "Attachment N -" within item descriptions
-// Match: ", Attachment N - Description" where Description can contain URLs, commas, etc.
-// We'll match until we see another "Attachment" pattern or end of string
-const EMBEDDED_ATTACHMENT_RE = /,\s*Attachment\s+(\d+)\s*[-–—]\s*((?:(?!,\s*Attachment\s+\d+).)+?)(?=,\s*Attachment\s+\d+|$)/gi;
+// Pattern to detect embedded attachments like ", Attachment 48 – Description"
+// Using capturing group so split() includes the number in results
+const EMBEDDED_ATTACHMENT_RE = /,\s*Attachment\s+(\d+)\s*[-–—]\s*/gi;
 const ITEM_ENUM_RE = /^\s*\((\d+)\)\s*(.+?)(?:,?\s*available\s+at\s*[:\-–—]?\s*(https?:\/\/\S+))?\s*\.?\s*$/i;
 const URL_IN_TEXT_RE = /https?:\/\/\S+/g;
+
+function normalizeHeadingPronouns(title: string): string {
+  // Operates on section headings - replace I/MY/ME with PETITIONER
+  let t = title.toUpperCase();
+
+  // Common phrases first (to keep grammar reasonable where easy)
+  t = t.replace(/\bABOUT\s+ME\b/g, 'ABOUT PETITIONER');
+  t = t.replace(/\bOF\s+MY\b/g, "OF PETITIONER'S");
+  t = t.replace(/\bTHAT\s+I\s+COMMAND\b/g, 'THAT PETITIONER COMMANDS');
+  t = t.replace(/\bTHAT\s+I\s+HAVE\b/g, 'THAT PETITIONER HAS');
+  t = t.replace(/\bTHAT\s+I\s+AM\b/g, 'THAT PETITIONER IS');
+  t = t.replace(/\bTHAT\s+I\s+WILL\b/g, 'THAT PETITIONER WILL');
+  t = t.replace(/\bTHAT\s+I\b/g, 'THAT PETITIONER');
+
+  // Generic replacements
+  t = t.replace(/\bMY\b/g, "PETITIONER'S");
+  // Replace standalone pronoun I (avoid touching words like "IN")
+  t = t.replace(/(^|[^A-Z])I([^A-Z]|$)/g, '$1PETITIONER$2');
+  t = t.replace(/\bME\b/g, 'PETITIONER');
+
+  return t;
+}
 
 function cleanDesc(raw: string): string {
   let desc = raw.trim();
@@ -63,7 +84,9 @@ export function extractEB2(text: string): GroupedAttachments {
       
       const newSec = trimmed.replace(/\s+/g, ' ').trim();
       // Remove trailing page numbers
-      const cleanSec = newSec.replace(/\s+\d+\s*$/, '').trim();
+      let cleanSec = newSec.replace(/\s+\d+\s*$/, '').trim();
+      // Normalize pronouns (I/MY/ME -> PETITIONER)
+      cleanSec = normalizeHeadingPronouns(cleanSec);
       
       // If this is the first section, mark it
       if (firstSection === null) {
@@ -143,66 +166,41 @@ export function extractEB2(text: string): GroupedAttachments {
         let desc = (m[2] || '').trim().replace(/,$/, '');
         let url = (m[3] || '').trim();
         
-        // Check for embedded "Attachment N -" references in the ENTIRE line and split them
-        // Pattern: ", Attachment N - Description" where Description goes until next ", Attachment" or end
-        const fullLine = trimmed;
-        const embeddedPattern = /,\s*Attachment\s+(\d+)\s*[-–—]\s*/g;
-        const embeddedMatches: Array<{num: number, descStart: number, descEnd: number, fullMatchStart: number}> = [];
-        
-        let match;
-        embeddedPattern.lastIndex = 0;
-        while ((match = embeddedPattern.exec(fullLine)) !== null) {
-          const descStart = match.index + match[0].length;
-          // Find where this description ends: either next ", Attachment" or end of line
-          const remaining = fullLine.slice(descStart);
-          const nextAttachment = remaining.match(/,\s*Attachment\s+\d+\s*[-–—]\s*/);
-          const descEnd = nextAttachment ? descStart + (nextAttachment.index ?? 0) : fullLine.length;
+        // Check for embedded attachments like ", Attachment 48 – Description"
+        EMBEDDED_ATTACHMENT_RE.lastIndex = 0;
+        if (EMBEDDED_ATTACHMENT_RE.test(desc)) {
+          // Reset regex state
+          EMBEDDED_ATTACHMENT_RE.lastIndex = 0;
           
-          embeddedMatches.push({
-            num: parseInt(match[1]),
-            descStart: descStart,
-            descEnd: descEnd,
-            fullMatchStart: match.index
-          });
-        }
-        
-        if (embeddedMatches.length > 0) {
-          // Remove embedded attachments from main description
-          let cleanedDesc = desc;
-          for (const emb of embeddedMatches) {
-            // Remove the full ", Attachment N - Description" part
-            const fullEmbText = fullLine.slice(emb.fullMatchStart, emb.descEnd);
-            cleanedDesc = cleanedDesc.replace(fullEmbText, '').trim();
-          }
-          // Clean up any double commas or trailing commas
-          desc = cleanedDesc.replace(/,\s*,/g, ',').replace(/,\s*$/, '').trim();
+          // Split by embedded attachment pattern (with capturing group)
+          // JS split with capturing groups includes captured values in result:
+          // "A, Attachment 48 – B, Attachment 49 – C".split(pattern)
+          // => ["A", "48", "B", "49", "C"]
+          // So: parts[0]=mainDesc, parts[1]=num1, parts[2]=desc1, parts[3]=num2, parts[4]=desc2, ...
+          const parts = desc.split(EMBEDDED_ATTACHMENT_RE);
           
-          // Add embedded attachments as separate items
-          for (const emb of embeddedMatches) {
-            let embDesc = fullLine.slice(emb.descStart, emb.descEnd).trim();
-            
-            // Look for URL in the embedded attachment description or after it
-            let embUrl = '';
-            // First check if URL is in the description itself
-            const urlInDesc = embDesc.match(/available\s+at\s+[:\-–—]?\s*(https?:\/\/\S+)/i);
-            if (urlInDesc) {
-              embUrl = urlInDesc[1];
-              embDesc = embDesc.replace(/available\s+at\s+[:\-–—]?\s*https?:\/\/\S+/i, '').trim();
-            } else {
-              // Check after the embedded attachment
-              const embAfter = fullLine.slice(emb.descEnd);
-              const urlMatch = embAfter.match(/available\s+at\s+[:\-–—]?\s*(https?:\/\/\S+)/i);
-              if (urlMatch) {
-                embUrl = urlMatch[1];
-              }
-            }
+          // Get the main description (before first embedded attachment)
+          const mainDesc = parts[0].trim().replace(/,\s*$/, '');
+          
+          // Process pairs: (num at odd index, desc at next even index)
+          for (let i = 1; i < parts.length - 1; i += 2) {
+            const embNum = parseInt(parts[i]);
+            let embDesc = (parts[i + 1] || '').trim().replace(/,\s*$/, '').replace(/\.\s*$/, '');
             
             // Skip if already seen
-            if (seenGlobally[emb.num] && currentSec && seenGlobally[emb.num] !== currentSec) {
+            if (seenGlobally[embNum] && currentSec && seenGlobally[embNum] !== currentSec) {
               continue;
             }
-            if (currentSec && seenInSec[currentSec]?.has(emb.num)) {
+            if (currentSec && seenInSec[currentSec]?.has(embNum)) {
               continue;
+            }
+            
+            // Check if this embedded description has a URL
+            let embUrl = '';
+            const urlInEmb = embDesc.match(/,?\s*available\s+at\s*[:\-–—]?\s*(https?:\/\/\S+)/i);
+            if (urlInEmb) {
+              embUrl = urlInEmb[1];
+              embDesc = embDesc.replace(/,?\s*available\s+at\s*[:\-–—]?\s*https?:\/\/\S+/i, '').trim();
             }
             
             let fullEmbDesc = embDesc;
@@ -210,8 +208,11 @@ export function extractEB2(text: string): GroupedAttachments {
               fullEmbDesc = `${embDesc}, available at ${embUrl}`;
             }
             
-            foundItems.push({ num: emb.num, desc: cleanDesc(fullEmbDesc) });
+            foundItems.push({ num: embNum, desc: cleanDesc(fullEmbDesc) });
           }
+          
+          // Update main description to only include text before embedded attachments
+          desc = mainDesc;
         }
         
         // Look for URL anywhere in the line if not captured by regex

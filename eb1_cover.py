@@ -46,6 +46,9 @@ ITEM_ENUM_RE = re.compile(
 
 URL_IN_TEXT_RE = re.compile(r'https?://[^\s)\]>,;"\']+')
 
+# Pattern to detect embedded attachments like ", Attachment 48 – Description"
+EMBEDDED_ATTACHMENT_RE = re.compile(r',\s*Attachment\s+(\d+)\s*[-–—]\s*', re.I)
+
 # === Section header detection ===
 SECTION_LINE_RE = re.compile(
     r'^\s*(?:EVIDENCE\b.*|DOCUMENTATION TO ESTABLISH\b.*|SUSTAINED NATIONAL OR INTERNATIONAL ACCLAIM\b.*)$',
@@ -227,7 +230,7 @@ def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], Li
 
                 pairs.append((num, _clean_desc(full_desc)))
 
-            if pairs and current_section:
+            if pairs:
                 matched_any = True
                 groups[current_section].extend(pairs)
 
@@ -283,13 +286,46 @@ def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], Li
                 groups[current_section].extend(_dedupe_best(pairs))
 
         # Fallback: handle plain enumerations like "(12) Description, available at: URL"
-        if not matched_any and current_section:
+        if not matched_any:
             m = ITEM_ENUM_RE.match(text)
             if m:
                 para_links = _hyperlinks_in_paragraph(p)
                 num = int(m.group(1))
                 desc = (m.group(2) or '').strip().rstrip(',')
                 url = (m.group(3) or '').strip()
+
+                # Check for embedded attachments like ", Attachment 48 – Description"
+                embedded_attachments = []
+                if EMBEDDED_ATTACHMENT_RE.search(desc):
+                    # Split by embedded attachment pattern (with capturing group)
+                    # Python split with capturing groups includes captured values:
+                    # "A, Attachment 48 – B, Attachment 49 – C".split(pattern)
+                    # => ["A", "48", "B", "49", "C"]
+                    parts = EMBEDDED_ATTACHMENT_RE.split(desc)
+                    
+                    # Get main description (before first embedded attachment)
+                    main_desc = parts[0].strip().rstrip(',')
+                    
+                    # Process pairs: (num at odd index, desc at next even index)
+                    for i in range(1, len(parts) - 1, 2):
+                        emb_num = int(parts[i])
+                        emb_desc = (parts[i + 1] if i + 1 < len(parts) else '').strip().rstrip(',.').strip()
+                        
+                        # Check for URL in embedded description
+                        emb_url = ''
+                        url_match = re.search(r',?\s*available\s+at\s*[:\-–—]?\s*(https?://\S+)', emb_desc, re.I)
+                        if url_match:
+                            emb_url = url_match.group(1)
+                            emb_desc = re.sub(r',?\s*available\s+at\s*[:\-–—]?\s*https?://\S+', '', emb_desc, flags=re.I).strip()
+                        
+                        full_emb_desc = emb_desc
+                        if emb_url:
+                            full_emb_desc = f"{emb_desc}, available at {emb_url}"
+                        
+                        embedded_attachments.append((emb_num, _clean_desc(full_emb_desc)))
+                    
+                    # Update main description
+                    desc = main_desc
 
                 # Prefer any URL in the paragraph text
                 if not url:
@@ -312,6 +348,10 @@ def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], Li
                                            rf'\1{url}', full_desc, flags=re.I)
 
                 groups[current_section].append((num, _clean_desc(full_desc)))
+                
+                # Add embedded attachments as separate items
+                for emb_item in embedded_attachments:
+                    groups[current_section].append(emb_item)
 
     # Final pass: dedupe per section and remove empty sections
     result = OrderedDict()
