@@ -1,7 +1,3 @@
 {
-  "framework": "nextjs",
-  "installCommand": "cd cover-sheet && npm install",
-  "buildCommand": "cd cover-sheet && npm run build",
-  "outputDirectory": "cover-sheet/.next"
+  "framework": "nextjs"
 }
-
