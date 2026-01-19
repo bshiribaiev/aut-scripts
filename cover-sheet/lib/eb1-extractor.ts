@@ -183,7 +183,57 @@ export function extractEB1(text: string): GroupedAttachments {
           }
         }
         
-        // Build final description
+        // Check for embedded attachments like ", Attachment 2 - Description"
+        const embeddedAttachments: Attachment[] = [];
+        const embeddedPattern = new RegExp(`,?\\s*Attachment\\s+(\\d+)\\s*[-–—−‐‑‒―]?\\s*`, 'gi');
+        
+        if (embeddedPattern.test(desc)) {
+          // Split by embedded attachment pattern
+          const parts = desc.split(/,?\s*Attachment\s+\d+\s*[-–—−‐‑‒―]?\s*/i);
+          const embNums = [...desc.matchAll(/,?\s*Attachment\s+(\d+)\s*[-–—−‐‑‒―]?\s*/gi)];
+          
+          // First part is the main description
+          let mainDesc = (parts[0] || '').trim().replace(/,$/, '');
+          let mainUrl = '';
+          
+          // Extract URL from main description if present
+          const mainUrlMatch = mainDesc.match(/,?\s*available\s+at\s*[:|\-–—−‐‑‒―]?\s*(https?:\/\/\S+)/i);
+          if (mainUrlMatch) {
+            mainUrl = mainUrlMatch[1];
+            mainDesc = mainDesc.replace(/,?\s*available\s+at\s*[:|\-–—−‐‑‒―]?\s*https?:\/\/\S+/i, '').trim();
+          }
+          
+          // Process embedded attachments
+          for (let i = 0; i < embNums.length; i++) {
+            const embNum = parseInt(embNums[i][1]);
+            let embDesc = (parts[i + 1] || '').trim().replace(/,$/, '');
+            let embUrl = '';
+            
+            // Extract URL from embedded description if present
+            const embUrlMatch = embDesc.match(/,?\s*available\s+at\s*[:|\-–—−‐‑‒―]?\s*(https?:\/\/\S+)/i);
+            if (embUrlMatch) {
+              embUrl = embUrlMatch[1];
+              embDesc = embDesc.replace(/,?\s*available\s+at\s*[:|\-–—−‐‑‒―]?\s*https?:\/\/\S+/i, '').trim();
+            }
+            
+            let fullEmbDesc = embDesc;
+            if (embUrl) {
+              fullEmbDesc = `${embDesc}, available at ${embUrl}`;
+            }
+            
+            if (embDesc) {
+              embeddedAttachments.push({ num: embNum, desc: cleanDesc(fullEmbDesc) });
+            }
+          }
+          
+          // Update main description
+          desc = mainDesc;
+          if (mainUrl && !url) {
+            url = mainUrl;
+          }
+        }
+        
+        // Build final description for main item
         let fullDesc = desc;
         if (url) {
           if (!/available\s+at/i.test(fullDesc)) {
@@ -194,6 +244,11 @@ export function extractEB1(text: string): GroupedAttachments {
         }
         
         pairs.push({ num, desc: cleanDesc(fullDesc) });
+        
+        // Add embedded attachments
+        for (const emb of embeddedAttachments) {
+          pairs.push(emb);
+        }
       }
       
       if (pairs.length > 0) {
