@@ -41,28 +41,28 @@ function normalizeHeadingPronouns(title: string): string {
 
 function cleanDesc(raw: string): string {
   let desc = raw.trim();
-  
+
   // Transform standalone "CV" to "Petitioner's CV" (if not already prefixed)
   if (!/Petitioner['']?s\s+CV/i.test(desc)) {
     desc = desc.replace(/\bCV\b/g, "Petitioner's CV");
   }
-  
+
   // Remove page references like ", pages 24-25" or ", page 50" or ", pp. 24-25"
   desc = desc.replace(/,?\s*(?:pages?|pp\.?)\s*[\d\-–—,\s]+/gi, '');
-  
+
   // Normalize ugly tail punctuation like ")." -> "."
   desc = desc.replace(/\)\.$/, '.');
   desc = desc.replace(/\)$/, '');
-  
+
   // Remove trailing commas
   desc = desc.replace(/,\s*$/, '');
-  
+
   // Ensure single terminal period
   desc = desc.trim();
   if (!desc.endsWith('.')) {
     desc += '.';
   }
-  
+
   return desc;
 }
 
@@ -73,31 +73,31 @@ export function extractEB2(text: string): GroupedAttachments {
   const preSectionItems: { [num: number]: Attachment } = {}; // Items before first section
   let currentSec: string | null = null;
   let firstSection: string | null = null;
-  
+
   const paragraphs = text.split(/\n+/).filter(p => p.trim());
-  
+
   for (const para of paragraphs) {
     const trimmed = para.trim();
     if (!trimmed) continue;
-    
+
     // Check if it's a section header (exclude CONCLUSION and table of contents entries)
     if (SECTION_RX.test(trimmed) && !/CONCLUSION/i.test(trimmed)) {
       // Skip if it looks like a TOC entry (ends with just a number or tab+number)
       if (/[\t\s]+\d+\s*$/.test(trimmed)) {
         continue;
       }
-      
+
       const newSec = trimmed.replace(/\s+/g, ' ').trim();
       // Remove trailing page numbers
       let cleanSec = newSec.replace(/\s+\d+\s*$/, '').trim();
       // Normalize pronouns (I/MY/ME -> PETITIONER)
       cleanSec = normalizeHeadingPronouns(cleanSec);
-      
+
       // If this is the first section, mark it
       if (firstSection === null) {
         firstSection = cleanSec;
       }
-      
+
       currentSec = cleanSec;
       if (!bySec[currentSec]) {
         bySec[currentSec] = [];
@@ -105,29 +105,29 @@ export function extractEB2(text: string): GroupedAttachments {
       }
       continue;
     }
-    
+
     let matchedAny = false;
     let foundItems: Attachment[] = [];
-    
+
     // First, check for "(See Attachment N – ...)" format
     const seeAttachmentMatches = Array.from(trimmed.matchAll(SEE_ATTACHMENT_RE));
     if (seeAttachmentMatches.length > 0) {
       for (const m of seeAttachmentMatches) {
         const num = parseInt(m[1]);
-        
+
         // Skip if we've already seen this attachment in a section (prefer section over pre-section)
         if (seenGlobally[num] && currentSec && seenGlobally[num] !== currentSec) {
           continue;
         }
-        
+
         // Skip if we've already seen this attachment number in current section
         if (currentSec && seenInSec[currentSec]?.has(num)) {
           continue;
         }
-        
+
         let desc = (m[2] || '').trim().replace(/,$/, '');
         let url = (m[3] || '').trim();
-        
+
         // Look for URL in the rest of the paragraph if not captured
         if (!url) {
           const restOfPara = trimmed.slice((m.index || 0) + m[0].length);
@@ -136,7 +136,7 @@ export function extractEB2(text: string): GroupedAttachments {
             url = urlMatch[1];
           }
         }
-        
+
         let fullDesc = desc;
         if (url) {
           if (!/available\s+at/i.test(fullDesc)) {
@@ -145,53 +145,53 @@ export function extractEB2(text: string): GroupedAttachments {
             fullDesc = fullDesc.replace(/(available\s+at)\s*[:\-–—]?\s*$/i, `$1 ${url}`);
           }
         }
-        
+
         const item = { num, desc: cleanDesc(fullDesc) };
         foundItems.push(item);
         matchedAny = true;
       }
     }
-    
+
     // Fallback: handle plain enumerations like "(12) Description, available at: URL"
     if (!matchedAny) {
       const m = trimmed.match(ITEM_ENUM_RE);
       if (m) {
         const num = parseInt(m[1]);
-        
+
         // Skip if we've already seen this attachment in a section (prefer section over pre-section)
         if (seenGlobally[num] && currentSec && seenGlobally[num] !== currentSec) {
           continue;
         }
-        
+
         // Skip if we've already seen this attachment number in current section
         if (currentSec && seenInSec[currentSec]?.has(num)) {
           continue;
         }
-        
+
         let desc = (m[2] || '').trim().replace(/,$/, '');
         let url = (m[3] || '').trim();
-        
+
         // Check for embedded attachments like ", Attachment 48 – Description"
         EMBEDDED_ATTACHMENT_RE.lastIndex = 0;
         if (EMBEDDED_ATTACHMENT_RE.test(desc)) {
           // Reset regex state
           EMBEDDED_ATTACHMENT_RE.lastIndex = 0;
-          
+
           // Split by embedded attachment pattern (with capturing group)
           // JS split with capturing groups includes captured values in result:
           // "A, Attachment 48 – B, Attachment 49 – C".split(pattern)
           // => ["A", "48", "B", "49", "C"]
           // So: parts[0]=mainDesc, parts[1]=num1, parts[2]=desc1, parts[3]=num2, parts[4]=desc2, ...
           const parts = desc.split(EMBEDDED_ATTACHMENT_RE);
-          
+
           // Get the main description (before first embedded attachment)
           const mainDesc = parts[0].trim().replace(/,\s*$/, '');
-          
+
           // Process pairs: (num at odd index, desc at next even index)
           for (let i = 1; i < parts.length - 1; i += 2) {
             const embNum = parseInt(parts[i]);
             let embDesc = (parts[i + 1] || '').trim().replace(/,\s*$/, '').replace(/\.\s*$/, '');
-            
+
             // Skip if already seen
             if (seenGlobally[embNum] && currentSec && seenGlobally[embNum] !== currentSec) {
               continue;
@@ -199,7 +199,7 @@ export function extractEB2(text: string): GroupedAttachments {
             if (currentSec && seenInSec[currentSec]?.has(embNum)) {
               continue;
             }
-            
+
             // Check if this embedded description has a URL
             let embUrl = '';
             const urlInEmb = embDesc.match(/,?\s*available\s+at\s*[:\-–—]?\s*(https?:\/\/\S+)/i);
@@ -207,19 +207,19 @@ export function extractEB2(text: string): GroupedAttachments {
               embUrl = urlInEmb[1];
               embDesc = embDesc.replace(/,?\s*available\s+at\s*[:\-–—]?\s*https?:\/\/\S+/i, '').trim();
             }
-            
+
             let fullEmbDesc = embDesc;
             if (embUrl) {
               fullEmbDesc = `${embDesc}, available at ${embUrl}`;
             }
-            
+
             foundItems.push({ num: embNum, desc: cleanDesc(fullEmbDesc) });
           }
-          
+
           // Update main description to only include text before embedded attachments
           desc = mainDesc;
         }
-        
+
         // Look for URL anywhere in the line if not captured by regex
         if (!url) {
           const found = trimmed.match(/available\s+at\s+[:\-–—]?\s*(https?:\/\/\S+)/i);
@@ -227,7 +227,7 @@ export function extractEB2(text: string): GroupedAttachments {
             url = found[1];
           }
         }
-        
+
         let fullDesc = desc;
         if (url) {
           if (!/available\s+at/i.test(fullDesc)) {
@@ -236,11 +236,11 @@ export function extractEB2(text: string): GroupedAttachments {
             fullDesc = fullDesc.replace(/(available\s+at)\s*[:\-–—]?\s*$/i, `$1 ${url}`);
           }
         }
-        
+
         foundItems.push({ num, desc: cleanDesc(fullDesc) });
       }
     }
-    
+
     // Add found items to appropriate section
     for (const item of foundItems) {
       if (currentSec) {
@@ -260,11 +260,11 @@ export function extractEB2(text: string): GroupedAttachments {
       }
     }
   }
-  
+
   // Final pass: deduplicate across sections (keep only first occurrence) and sort
   const result: GroupedAttachments = {};
   const finalSeen: Set<number> = new Set();
-  
+
   // First, add pre-section items that weren't captured in any section
   // These appear before any section header and should be output first without a heading
   const preSectionList: Attachment[] = [];
@@ -279,7 +279,7 @@ export function extractEB2(text: string): GroupedAttachments {
     // Use empty string as key for pre-section items (will be rendered without heading)
     result[''] = preSectionList.sort((a, b) => a.num - b.num);
   }
-  
+
   for (const sec in bySec) {
     const sectionItems: Attachment[] = [];
     for (const item of bySec[sec]) {
@@ -292,6 +292,6 @@ export function extractEB2(text: string): GroupedAttachments {
       result[sec] = sectionItems.sort((a, b) => a.num - b.num);
     }
   }
-  
+
   return result;
 }
