@@ -348,7 +348,7 @@ def extract_grouped(docx_path: str, debug: bool=False) -> Dict[Optional[str], Li
                                            rf'\1{url}', full_desc, flags=re.I)
 
                 groups[current_section].append((num, _clean_desc(full_desc)))
-                
+
                 # Add embedded attachments as separate items
                 for emb_item in embedded_attachments:
                     groups[current_section].append(emb_item)

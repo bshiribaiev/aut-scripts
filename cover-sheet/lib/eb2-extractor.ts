@@ -42,6 +42,11 @@ function normalizeHeadingPronouns(title: string): string {
 function cleanDesc(raw: string): string {
   let desc = raw.trim();
   
+  // Transform standalone "CV" to "Petitioner's CV" (if not already prefixed)
+  if (!/Petitioner['']?s\s+CV/i.test(desc)) {
+    desc = desc.replace(/\bCV\b/g, "Petitioner's CV");
+  }
+  
   // Remove page references like ", pages 24-25" or ", page 50" or ", pp. 24-25"
   desc = desc.replace(/,?\s*(?:pages?|pp\.?)\s*[\d\-–—,\s]+/gi, '');
   

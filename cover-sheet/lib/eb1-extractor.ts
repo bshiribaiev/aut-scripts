@@ -54,6 +54,11 @@ function normalizeHeadingPronouns(titleUpper: string): string {
 function cleanDesc(raw: string): string {
   let desc = raw.trim().replace(/\s+/g, ' ');
   
+  // Transform standalone "CV" to "Petitioner's CV" (if not already prefixed)
+  if (!/Petitioner['']?s\s+CV/i.test(desc)) {
+    desc = desc.replace(/\bCV\b/g, "Petitioner's CV");
+  }
+  
   // Remove page references like ", pages 24-25" or ", page 50" or ", pp. 24-25"
   desc = desc.replace(/,?\s*(?:pages?|pp\.?)\s*[\d\-–—,\s]+/gi, '');
   
@@ -331,7 +336,7 @@ export function extractEB1(text: string): GroupedAttachments {
         
         let fullDesc = desc;
         if (url && !/available\s+at/i.test(fullDesc)) {
-          fullDesc = `${fullDesc}, available at ${url}`;
+            fullDesc = `${fullDesc}, available at ${url}`;
         } else if (url) {
           fullDesc = fullDesc.replace(new RegExp(`(available\\s+at)\\s*[:${DASH_CHARS}]?\\s*$`, 'i'), `$1 ${url}`);
         }
