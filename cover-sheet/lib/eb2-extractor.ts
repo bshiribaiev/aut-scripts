@@ -10,11 +10,14 @@ export interface GroupedAttachments {
 
 const SECTION_RX = /^[IVXLCDM]+\.\s+.+/i;
 // Also handle "(See Attachment N – ...)" format embedded in paragraphs
-const SEE_ATTACHMENT_RE = /\(See\s+Attachment\s+(\d+)\s*[-–—]\s*(.+?)(?:,?\s*available\s+at\s*[:\-–—]?\s*(https?:\/\/\S+))?\s*\)/gi;
-// Pattern to detect embedded attachments like ", Attachment 48 – Description"
+// Unicode dashes: hyphen-minus, en-dash, em-dash, minus, figure dash, horizontal bar
+const SEE_ATTACHMENT_RE = /\(See\s+Attachment\s+(\d+)\s*[-–—−‐‑‒―]\s*(.+?)(?:,?\s*available\s+at\s*[:\-–—−‐‑‒―]?\s*(https?:\/\/\S+))?\s*\)/gi;
+// Pattern to detect embedded attachments like ", Attachment 48 – Description" or "Attachment 48 – Description"
 // Using capturing group so split() includes the number in results
-const EMBEDDED_ATTACHMENT_RE = /,\s*Attachment\s+(\d+)\s*[-–—]\s*/gi;
-const ITEM_ENUM_RE = /^\s*\((\d+)\)\s*(.+?)(?:,?\s*available\s+at\s*[:\-–—]?\s*(https?:\/\/\S+))?\s*\.?\s*$/i;
+// Made comma optional to handle cases without comma before "Attachment"
+// Unicode dashes: hyphen-minus, en-dash, em-dash, minus, figure dash, horizontal bar
+const EMBEDDED_ATTACHMENT_RE = /,?\s*Attachment\s+(\d+)\s*[-–—−‐‑‒―]\s*/gi;
+const ITEM_ENUM_RE = /^\s*\((\d+)\)\s*(.+?)(?:,?\s*available\s+at\s*[:\-–—−‐‑‒―]?\s*(https?:\/\/\S+))?\s*\.?\s*$/i;
 const URL_IN_TEXT_RE = /https?:\/\/\S+/g;
 
 function normalizeHeadingPronouns(title: string): string {
@@ -134,6 +137,45 @@ export function extractEB2(text: string): GroupedAttachments {
           const urlMatch = restOfPara.match(/available\s+at\s+[:\-–—]?\s*(https?:\/\/\S+)/i);
           if (urlMatch) {
             url = urlMatch[1];
+          }
+        }
+
+        // Check for embedded attachments like ", Attachment 23 – Description"
+        EMBEDDED_ATTACHMENT_RE.lastIndex = 0;
+        if (EMBEDDED_ATTACHMENT_RE.test(desc)) {
+          EMBEDDED_ATTACHMENT_RE.lastIndex = 0;
+          const parts = desc.split(EMBEDDED_ATTACHMENT_RE);
+
+          // Main description is before first embedded attachment
+          desc = parts[0].trim().replace(/,\s*$/, '');
+
+          // Process embedded attachments (pairs: num at odd index, desc at next even index)
+          for (let i = 1; i < parts.length - 1; i += 2) {
+            const embNum = parseInt(parts[i]);
+            let embDesc = (parts[i + 1] || '').trim().replace(/,\s*$/, '').replace(/\.\s*$/, '');
+
+            // Skip if already seen
+            if (seenGlobally[embNum] && currentSec && seenGlobally[embNum] !== currentSec) {
+              continue;
+            }
+            if (currentSec && seenInSec[currentSec]?.has(embNum)) {
+              continue;
+            }
+
+            // Check for URL in embedded description
+            let embUrl = '';
+            const urlInEmb = embDesc.match(/,?\s*available\s+at\s*[:\-–—−‐‑‒―]?\s*(https?:\/\/\S+)/i);
+            if (urlInEmb) {
+              embUrl = urlInEmb[1];
+              embDesc = embDesc.replace(/,?\s*available\s+at\s*[:\-–—−‐‑‒―]?\s*https?:\/\/\S+/i, '').trim();
+            }
+
+            let fullEmbDesc = embDesc;
+            if (embUrl) {
+              fullEmbDesc = `${embDesc}, available at ${embUrl}`;
+            }
+
+            foundItems.push({ num: embNum, desc: cleanDesc(fullEmbDesc) });
           }
         }
 
