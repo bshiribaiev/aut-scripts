@@ -13,7 +13,8 @@ const SECTION_RX = /^[IVXLCDM]+\.\s+.+/i;
 const E2X_SECTION_RX = /^E2[12]\s+.+/i;
 // Also handle "(See Attachment N – ...)" format embedded in paragraphs
 // Unicode dashes: hyphen-minus, en-dash, em-dash, minus, figure dash, horizontal bar
-const SEE_ATTACHMENT_RE = /\(See\s+Attachment\s+(\d+)\s*[-–—−‐‑‒―]\s*(.+?)(?:,?\s*available\s+at\s*[:\-–—−‐‑‒―]?\s*(https?:\/\/\S+))?\s*\)/gi;
+// Using greedy (.+) to handle descriptions with parentheses like "(complete)"
+const SEE_ATTACHMENT_RE = /\(See\s+Attachment\s+(\d+)\s*[-–—−‐‑‒―]\s*(.+)(?:,?\s*available\s+at\s*[:\-–—−‐‑‒―]?\s*(https?:\/\/\S+))?\s*\)/gi;
 // Pattern to detect embedded attachments like ", Attachment 48 – Description" or "Attachment 48 – Description"
 // Using capturing group so split() includes the number in results
 // Made comma optional to handle cases without comma before "Attachment"
