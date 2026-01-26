@@ -9,6 +9,8 @@ export interface GroupedAttachments {
 }
 
 const SECTION_RX = /^[IVXLCDM]+\.\s+.+/i;
+// E21/E22 exceptional ability headings
+const E2X_SECTION_RX = /^E2[12]\s+.+/i;
 // Also handle "(See Attachment N – ...)" format embedded in paragraphs
 // Unicode dashes: hyphen-minus, en-dash, em-dash, minus, figure dash, horizontal bar
 const SEE_ATTACHMENT_RE = /\(See\s+Attachment\s+(\d+)\s*[-–—−‐‑‒―]\s*(.+?)(?:,?\s*available\s+at\s*[:\-–—−‐‑‒―]?\s*(https?:\/\/\S+))?\s*\)/gi;
@@ -84,7 +86,10 @@ export function extractEB2(text: string): GroupedAttachments {
     if (!trimmed) continue;
 
     // Check if it's a section header (exclude CONCLUSION and table of contents entries)
-    if (SECTION_RX.test(trimmed) && !/CONCLUSION/i.test(trimmed)) {
+    const isRomanSection = SECTION_RX.test(trimmed) && !/CONCLUSION/i.test(trimmed);
+    const isE2xSection = E2X_SECTION_RX.test(trimmed);
+
+    if (isRomanSection || isE2xSection) {
       // Skip if it looks like a TOC entry (ends with just a number or tab+number)
       if (/[\t\s]+\d+\s*$/.test(trimmed)) {
         continue;
@@ -93,8 +98,10 @@ export function extractEB2(text: string): GroupedAttachments {
       const newSec = trimmed.replace(/\s+/g, ' ').trim();
       // Remove trailing page numbers
       let cleanSec = newSec.replace(/\s+\d+\s*$/, '').trim();
-      // Normalize pronouns (I/MY/ME -> PETITIONER)
-      cleanSec = normalizeHeadingPronouns(cleanSec);
+      // Normalize pronouns (I/MY/ME -> PETITIONER) - only for Roman numeral sections
+      if (isRomanSection) {
+        cleanSec = normalizeHeadingPronouns(cleanSec);
+      }
 
       // If this is the first section, mark it
       if (firstSection === null) {
