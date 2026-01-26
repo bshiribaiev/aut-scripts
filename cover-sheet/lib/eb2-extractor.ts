@@ -56,9 +56,25 @@ function cleanDesc(raw: string): string {
   // Remove page references like ", pages 24-25" or ", page 50" or ", pp. 24-25"
   desc = desc.replace(/,?\s*(?:pages?|pp\.?)\s*[\d\-–—,\s]+/gi, '');
 
-  // Normalize ugly tail punctuation like ")." -> "."
-  desc = desc.replace(/\)\.$/, '.');
-  desc = desc.replace(/\)$/, '');
+  // Handle parentheses balancing
+  const openParens = (desc.match(/\(/g) || []).length;
+  const closeParens = (desc.match(/\)/g) || []).length;
+  if (closeParens > openParens) {
+    // Over-closed: remove excess trailing ")"
+    const excess = closeParens - openParens;
+    for (let i = 0; i < excess; i++) {
+      desc = desc.replace(/\)\.$/, '.').replace(/\)$/, '');
+    }
+  } else if (openParens > closeParens) {
+    // Missing closing parens - insert before trailing period if present
+    const missing = ')'.repeat(openParens - closeParens);
+    if (desc.endsWith('.')) {
+      desc = desc.slice(0, -1) + missing + '.';
+    } else {
+      desc += missing;
+    }
+  }
+  // If balanced, leave as-is
 
   // Remove trailing commas
   desc = desc.replace(/,\s*$/, '');
