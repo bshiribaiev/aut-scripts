@@ -83,23 +83,23 @@ def gather(docx_path: str):
         # First try: Find all "Attachment N —" anchors in this paragraph and slice between them
         matches = list(ATTACH_ANCHOR_RX.finditer(para))
         if matches:
-        for i, m in enumerate(matches):
-            num = int(m.group(1))
+            for i, m in enumerate(matches):
+                num = int(m.group(1))
 
-            # Skip if we've already seen this attachment number in this section
-            if num in seen_in_sec[current_sec]:
-                continue
+                # Skip if we've already seen this attachment number in this section
+                if num in seen_in_sec[current_sec]:
+                    continue
 
-            start = m.end()
-            end = matches[i + 1].start() if i + 1 < len(matches) else len(para)
-            raw_desc = para[start:end]
+                start = m.end()
+                end = matches[i + 1].start() if i + 1 < len(matches) else len(para)
+                raw_desc = para[start:end]
 
-            # Trim trailing junk that often follows the reference on the same line
-            # but DO NOT clip URLs: we rely on anchor slicing so URLs stay intact
-            desc = _clean_desc(raw_desc)
+                # Trim trailing junk that often follows the reference on the same line
+                # but DO NOT clip URLs: we rely on anchor slicing so URLs stay intact
+                desc = _clean_desc(raw_desc)
 
-            by_sec[current_sec].append((num, desc))
-            seen_in_sec[current_sec].add(num)  # Mark this attachment as seen
+                by_sec[current_sec].append((num, desc))
+                seen_in_sec[current_sec].add(num)  # Mark this attachment as seen
             continue
 
         # Fallback: Handle "(N) Description" format with possible embedded attachments
