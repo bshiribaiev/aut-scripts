@@ -91,10 +91,8 @@ function cleanDesc(raw: string): string {
 export function extractEB2(text: string): GroupedAttachments {
   const bySec: GroupedAttachments = {};
   const seenInSec: { [section: string]: Set<number> } = {};
-  const seenGlobally: { [num: number]: string } = {}; // Track which section each item first appeared in
   const preSectionItems: { [num: number]: Attachment } = {}; // Items before first section
   let currentSec: string | null = null;
-  let firstSection: string | null = null;
 
   const paragraphs = text.split(/\n+/).filter(p => p.trim());
 
@@ -120,11 +118,6 @@ export function extractEB2(text: string): GroupedAttachments {
         cleanSec = normalizeHeadingPronouns(cleanSec);
       }
 
-      // If this is the first section, mark it
-      if (firstSection === null) {
-        firstSection = cleanSec;
-      }
-
       currentSec = cleanSec;
       if (!bySec[currentSec]) {
         bySec[currentSec] = [];
@@ -141,11 +134,6 @@ export function extractEB2(text: string): GroupedAttachments {
     if (seeAttachmentMatches.length > 0) {
       for (const m of seeAttachmentMatches) {
         const num = parseInt(m[1]);
-
-        // Skip if we've already seen this attachment in a section (prefer section over pre-section)
-        if (seenGlobally[num] && currentSec && seenGlobally[num] !== currentSec) {
-          continue;
-        }
 
         // Skip if we've already seen this attachment number in current section
         if (currentSec && seenInSec[currentSec]?.has(num)) {
@@ -178,10 +166,7 @@ export function extractEB2(text: string): GroupedAttachments {
             const embNum = parseInt(parts[i]);
             let embDesc = (parts[i + 1] || '').trim().replace(/,\s*$/, '').replace(/\.\s*$/, '');
 
-            // Skip if already seen
-            if (seenGlobally[embNum] && currentSec && seenGlobally[embNum] !== currentSec) {
-              continue;
-            }
+            // Skip if already seen in current section
             if (currentSec && seenInSec[currentSec]?.has(embNum)) {
               continue;
             }
@@ -224,11 +209,6 @@ export function extractEB2(text: string): GroupedAttachments {
       if (m) {
         const num = parseInt(m[1]);
 
-        // Skip if we've already seen this attachment in a section (prefer section over pre-section)
-        if (seenGlobally[num] && currentSec && seenGlobally[num] !== currentSec) {
-          continue;
-        }
-
         // Skip if we've already seen this attachment number in current section
         if (currentSec && seenInSec[currentSec]?.has(num)) {
           continue;
@@ -258,10 +238,7 @@ export function extractEB2(text: string): GroupedAttachments {
             const embNum = parseInt(parts[i]);
             let embDesc = (parts[i + 1] || '').trim().replace(/,\s*$/, '').replace(/\.\s*$/, '');
 
-            // Skip if already seen
-            if (seenGlobally[embNum] && currentSec && seenGlobally[embNum] !== currentSec) {
-              continue;
-            }
+            // Skip if already seen in current section
             if (currentSec && seenInSec[currentSec]?.has(embNum)) {
               continue;
             }
@@ -311,49 +288,30 @@ export function extractEB2(text: string): GroupedAttachments {
     for (const item of foundItems) {
       if (currentSec) {
         // We're in a section, add to it (and remove from pre-section if it was there)
-        // Only add if we haven't seen it in a different section, or if it was in pre-section
-        if (!seenGlobally[item.num] || preSectionItems[item.num]) {
-          delete preSectionItems[item.num];
-          bySec[currentSec].push(item);
-          seenInSec[currentSec].add(item.num);
-          seenGlobally[item.num] = currentSec;
-        }
+        delete preSectionItems[item.num];
+        bySec[currentSec].push(item);
+        seenInSec[currentSec].add(item.num);
       } else {
-        // Before first section, collect for later (only if not already in a section)
-        if (!seenGlobally[item.num]) {
-          preSectionItems[item.num] = item;
-        }
+        // Before first section, collect for later
+        preSectionItems[item.num] = item;
       }
     }
   }
 
-  // Final pass: deduplicate across sections (keep only first occurrence) and sort
+  // Final pass: sort attachments within each section (deduplication already done per-section)
+  // Attachments CAN appear in multiple sections - only deduplicated within same section
   const result: GroupedAttachments = {};
-  const finalSeen: Set<number> = new Set();
 
   // First, add pre-section items that weren't captured in any section
   // These appear before any section header and should be output first without a heading
-  const preSectionList: Attachment[] = [];
-  for (const num in preSectionItems) {
-    const item = preSectionItems[num];
-    if (!finalSeen.has(item.num)) {
-      preSectionList.push(item);
-      finalSeen.add(item.num);
-    }
-  }
+  const preSectionList: Attachment[] = Object.values(preSectionItems);
   if (preSectionList.length > 0) {
     // Use empty string as key for pre-section items (will be rendered without heading)
     result[''] = preSectionList.sort((a, b) => a.num - b.num);
   }
 
   for (const sec in bySec) {
-    const sectionItems: Attachment[] = [];
-    for (const item of bySec[sec]) {
-      if (!finalSeen.has(item.num)) {
-        sectionItems.push(item);
-        finalSeen.add(item.num);
-      }
-    }
+    const sectionItems = bySec[sec];
     if (sectionItems.length > 0) {
       result[sec] = sectionItems.sort((a, b) => a.num - b.num);
     }
